@@ -1,14 +1,15 @@
 #TODO: These constants should be configurable, maybe via JSON?
-p01 = .01
-p10 = .08
-relaxation_rate = 1/10.0
+p01 = 0.01
+p10 = 0.08
+relaxation_rate =0# 1/100
+dephasing_rate = 1/10
 relax_op = (X+im*Y)/2
-δΩrel = 0.008
-δΔ = 0.18
+δΩrel = 0#0.001
+δΔ = 0#0.18
 δx = 0.05
 δy = 0.05
-δΔ_inhom = 0.37
-δΩ_inhom = 0.02
+δΔ_inhom =0# 0.37
+δΩ_inhom = 0#0.001
 
 function _aquila_coherent_noisy(h)
     (atoms,ϕ,Ω,Δ) = get_rydberg_params(h)
@@ -31,10 +32,14 @@ function _aquila_coherent_noisy(h)
 end
 
 function _aquila_collapse_operators(nqubits)
+    [[
+        sqrt(dephasing_rate) * SparseMatrixCSC(mat(put(nqubits, q => Z))) #single-qubit relaxation
+        for q in 1:nqubits
+    ];
     [
         sqrt(relaxation_rate) * mat(put(nqubits, q => relax_op)) #single-qubit relaxation
         for q in 1:nqubits
-    ]
+    ]]
 end
 
 function _aquila_confusion_mat(N)

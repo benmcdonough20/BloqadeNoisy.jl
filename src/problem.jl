@@ -51,6 +51,8 @@ struct NoisySchrodingerProblem{Reg,EquationType<:ODEFunction,uType,tType,Algo,Kw
     tspan::tType
     algo::Algo
     coherent_noise::Function
+    confusion_mat #Matrix-like
+    save_times
     kwargs::Kwargs
     p::Real
 end
@@ -58,18 +60,19 @@ end
 #internal constructor
 function NoisySchrodingerProblem(
     reg::AbstractRegister,
-    tspan,
+    save_times,
     expr,
     c_ops::Vector{T} where T <: SparseMatrixCSC,
-    coherent_noise::Function;
-    algo=DP8(),
-    kw...
+    coherent_noise::Function,
+    confusion_mat; #TODO: type checking
+    algo=DP8()
 )
     nqudits(reg) == nqudits(expr) || throw(ArgumentError("number of qubits/sites does not match!"))
 
+    tspan = (first(save_times), last(save_times))
+
     state = statevec(reg)
     space = YaoSubspaceArrayReg.space(reg)
-    tspan = SciMLBase.promote_tspan(tspan)
 
     T = real(eltype(state))
     T = isreal(expr) ? T : Complex{T}
@@ -88,18 +91,17 @@ function NoisySchrodingerProblem(
     jump_cb = ContinuousCallback( #trigger quantum jumps and collapse the state
         collapse_condition,
         (integrator)->collapse!(integrator, c_ops),
-        save_positions = (false, false)
     ) 
 
     #remove save_start and sate_on options to allow saving at specified times
-    default_ode_options = (
+    ode_options = pairs((
         save_everystep = false,
         dense = false,
         reltol=1e-10,
         abstol=1e-10,
+        saveat=save_times,
         callback = jump_cb #quantum jumps
-    )
-    kw = pairs(merge(default_ode_options, kw))
+    ))
 
     return NoisySchrodingerProblem(
         reg,
@@ -110,41 +112,45 @@ function NoisySchrodingerProblem(
         tspan,
         algo,
         coherent_noise,
-        kw,
+        confusion_mat,
+        save_times,
+        ode_options,
         rand(), #random initial condition
     )
 end
 
 function NoisySchrodingerProblem(
     reg,
-    tspan,
+    save_times,
     h, 
     c_ops::Array;
     kw...
 )
     return NoisySchrodingerProblem(
        reg,
-       tspan,
+       save_times,
        h,
        c_ops,
-       () -> h;
+       () -> h,
+       () -> nothing;
        kw...
     )
 end
 
 function NoisySchrodingerProblem(
     reg::ArrayReg,
-    tspan,
+    save_times,
     h::AbstractBlock,
     noise_model::ErrorModel;
     kw...
 )
     return NoisySchrodingerProblem(
         reg,
-        tspan,
+        save_times,
         h,
         noise_model.collapse_ops(nqubits(reg)),
-        noise_model.coherent_noise(h);
+        noise_model.coherent_noise(h),
+        noise_model.confusion_mat(nqubits(reg));
         kw...
     )
 end
@@ -193,6 +199,8 @@ function rebuild(prob::NoisySchrodingerProblem, p, h)
         prob.tspan,
         prob.algo,
         prob.coherent_noise,
+        prob.confusion_mat,
+        prob.save_times,
         prob.kwargs,
         p
     )
@@ -245,7 +253,7 @@ function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int;
     expectations = [],
-    output_func = sol -> sol,
+    output_func = u -> u,
     ensemble_algo = EnsembleSerial(),
 )
 
@@ -254,11 +262,45 @@ function emulate(
     prob_func(prob, i, repeat) = rebuild(prob, rand(), prob.coherent_noise())
 
     if !isempty(expectations)
-        output_func = (sol) -> [[real(normalize(u)' * e * normalize(u)) for e in expectations] for u in sol.u]
+        output_func = (u) -> [real(u' * e * u) for e in expectations]
     end
 
-    ensemble_prob = EnsembleProblem(prob_func(prob, 0, 0), prob_func = prob_func, output_func = (sol, i) -> (output_func(sol), false))
+    #IMPORTANT: see ContinuousCallback documentation. Because integrator state is saved before and after callback is triggered
+    #for accuracy, the timeseries end up being different lengths. This is why interpolation is used, but maybe there is a better solution
+    ensemble_prob = EnsembleProblem(prob_func(prob, 0, 0), prob_func = prob_func, output_func = (sol, i) -> ([output_func(normalize(sol(t))) for t in prob.save_times], false))
     solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
+end
+
+"""
+    function emulate
+
+# Arguments
+- prob: NoisySchrodingerProblem to emulate
+- ntraj: number of trajectories to use for simulation
+- noisy_expectations: Vector of operators that are diagonal in computational basis 
+- shots: If specified, the noisy_expectation values will be taken with simulated shots
+"""
+function emulate(
+    prob::NoisySchrodingerProblem,
+    ntraj::Int,
+    noisy_expectations::Vector{T} where T <: Diagonal;
+    shots = nothing,
+    kw...
+)
+
+    @assert all(isreal.(noisy_expectations)) #check that expectation operators are real
+
+    if shots === nothing
+        output_func = (u) -> [sum([real(e.diag[n]) * p for (n,p) in enumerate(prob.confusion_mat * abs.(u).^2)]) for e in noisy_expectations]
+        emulate(prob, ntraj; output_func = output_func, kw...)
+    else
+        output_func = u -> abs.(u).^2
+        sim = emulate(prob, ntraj; output_func = output_func, kw...)
+        prob_amps = expec_series_mean(sim, 1:length(prob.u0))
+        expec_shots(e, p) = (w = Weights(prob.confusion_mat * p); mean([real(e.diag[sample(w)]) for i in 1:shots]))
+        return [[expec_shots(e, p) for p in prob_amps] for e in noisy_expectations]
+    end 
+
 end
 
 """
@@ -282,4 +324,3 @@ function expec_series_err(sim, index)
     times = length(sim[1])
     [std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
 end
-

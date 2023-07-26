@@ -1,3 +1,5 @@
+using Kronecker
+using LinearAlgebra
 """
     struct ErrorModel
 
@@ -24,26 +26,39 @@ function measure_noisy
 
 #Arguments
 
-- reg: array register representing the quantum state to be measured
+- reg: statevector representing the quantum state to be measured
 - noise_model: an ErrorModel struct which contains a method to create the confusion matrix
 - site (optional): site to be measured
 - nshots (optional kwarg): number of measurements to return
 """
 function measure_noisy(
-    reg::ArrayReg, 
+    u::Vector, 
     noise_model::ErrorModel, 
-    site=nothing; 
+    sites=nothing; 
     nshots::Int = 1
     )
-    cmat = noise_model.confusion_mat(nqubits(reg)) #generate confusion matrix
-    w = Weights(cmat * abs.(statevec(reg)).^2) #create weights representing measurement probabilities
+    nqubits = round(Int,log2(length(u)))
+    cmat = noise_model.confusion_mat(nqubits) #generate confusion matrix
+    w = Weights(cmat * abs.(u).^2) #create weights representing measurement probabilities
     return if site === nothing
-        [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits(reg))) for i in 1:nshots]
+        [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits)) for i in 1:nshots]
     else
         try
-            [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits(reg)))[site] for i in 1:nshots]
+            [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits))[sites] for i in 1:nshots]
         catch BoundsError
-            error("Site not in range")
+            error("Site(s) not in range")
         end
     end
+end
+
+function rydberg_density_noisy_shots(
+   u::Vector,
+   noise_model::ErrorModel,
+   op::Diagonal,
+   shots
+)
+    nqubits = round(Int,log2(length(u)))
+    cmat = noise_model.confusion_mat(nqubits) #generate confusion matrix
+    w = Weights(cmat * abs.(u).^2) #create weights representing measurement probabilities
+    sum([op.diag[sample(w)] for i in 1:shots])/shots
 end
