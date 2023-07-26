@@ -249,6 +249,18 @@ end
 
 DiffEqBase.get_concrete_problem(prob::NoisySchrodingerProblem, isadapt; kw...) = prob
 
+"""
+    function emulate
+
+Emulate the evolution of a noisy system
+
+# Arguments
+- prob: NoisySchrodingerProblem to emulate
+- ntraj: number of trajectories to use for simulation
+- expectations: Matrices representing observables
+- output_func: Vector{Complex}->Any - Transformation of the statevector to save
+- ensemble_algo: See EnsembleProblem documentation. Common choices are EnsembleSerial and EnsembleThreaded
+"""
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int;
@@ -267,13 +279,13 @@ function emulate(
 
     #IMPORTANT: see ContinuousCallback documentation. Because integrator state is saved before and after callback is triggered
     #for accuracy, the timeseries end up being different lengths. This is why interpolation is used, but maybe there is a better solution
-    ensemble_prob = EnsembleProblem(prob_func(prob, 0, 0), prob_func = prob_func, output_func = (sol, i) -> ([output_func(normalize(sol(t))) for t in prob.save_times], false))
+    ensemble_prob = EnsembleProblem(prob, prob_func = prob_func, output_func = (sol, i) -> ([output_func(normalize(sol(t))) for t in prob.save_times], false))
     solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
 end
 
 """
     function emulate
-
+Emulate the evolution of a noisy system
 # Arguments
 - prob: NoisySchrodingerProblem to emulate
 - ntraj: number of trajectories to use for simulation
@@ -294,10 +306,13 @@ function emulate(
         output_func = (u) -> [sum([real(e.diag[n]) * p for (n,p) in enumerate(prob.confusion_mat * abs.(u).^2)]) for e in noisy_expectations]
         emulate(prob, ntraj; output_func = output_func, kw...)
     else
-        output_func = u -> abs.(u).^2
-        sim = emulate(prob, ntraj; output_func = output_func, kw...)
-        prob_amps = expec_series_mean(sim, 1:length(prob.u0))
-        expec_shots(e, p) = (w = Weights(prob.confusion_mat * p); mean([real(e.diag[sample(w)]) for i in 1:shots]))
+        sim = emulate(prob, ntraj; output_func = u -> abs.(u)^2, kw...) #get probability amplitudes
+        prob_amps = expec_series_mean(sim, 1:length(prob.u0)) #average probabilitiy amplitdues
+        expec_shots(e, p) = (
+            w = Weights(prob.confusion_mat * p); #create weights and apply confusion matrix
+            mean([real(e.diag[sample(w)]) for i in 1:shots]) #sample expectation value
+        )
+        #output format is a timeseries list for each expectation value
         return [[expec_shots(e, p) for p in prob_amps] for e in noisy_expectations]
     end 
 
