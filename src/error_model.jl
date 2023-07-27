@@ -1,6 +1,3 @@
-using Kronecker
-using LinearAlgebra
-using StatsBase
 """
     struct ErrorModel
 
@@ -34,7 +31,7 @@ function measure_noisy
 """
 function measure_noisy(
     noise_model::ErrorModel, 
-    amps::Vector{Real}, 
+    amps::Vector{T} where T <: Real, 
     sites=nothing; 
     nshots::Int = 1
     )

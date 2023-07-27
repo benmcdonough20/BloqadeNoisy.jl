@@ -272,6 +272,20 @@ Emulate the evolution of a noisy system
 """
 function emulate(
     prob::NoisySchrodingerProblem,
+    ntraj::Int,
+    output_func::Function;
+    ensemble_algo = EnsembleSerial()
+)
+    ensemble_prob = EnsembleProblem(
+        prob, 
+        prob_func = (prob, i, repeat)->randomize(prob), 
+        output_func = (sol, i) -> (output_func([normalize(sol(t)) for t in prob.save_times]),false)
+    )
+    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
+end
+
+function emulate(
+    prob::NoisySchrodingerProblem,
     ntraj::Int;
     report_error = false,
     ensemble_algo = EnsembleSerial()
@@ -292,36 +306,58 @@ end
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int,
-    output_func::Function;
-    ensemble_algo = EnsembleSerial()
-)
-    ensemble_prob = EnsembleProblem(
-        prob, 
-        prob_func = (prob, i, repeat)->randomize(prob), 
-        output_func = (sol, i) -> (output_func([normalize(sol(t)) for t in prob.save_times]),false)
-    )
-    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
-end
-
-function emulate(
-    prob::NoisySchrodingerProblem,
-    ntraj::Int,
     expectations::Array;
+    readout_error = false,
+    shots = 0,
     report_error = false,
     ensemble_algo = EnsembleSerial()
 )
 
-    @assert all(isreal.(expectations))
-    output_func = (sol) -> [[real(u' * e * u) for e in expectations] for u in sol]
-    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
+    @assert all(ishermitian.(expectations))
     
-    return if report_error
-        (
-            expectations = [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)],
-            twosigma = [simulation_series_err(sim, i) for (i,_) in enumerate(expectations)]
-        )
+    if !readout_error
+        output_func = (sol) -> [[real(u' * (e * u)) for e in expectations] for u in sol]
+        sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
+    
+        return if report_error
+            (
+                expectations = [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)],
+                twosigma = [simulation_series_err(sim, i) for (i,_) in enumerate(expectations)]
+            )
+        else
+            [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)]
+        end
     else
-        [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)]
+        @assert all([typeof(e) <: Diagonal for e in expectations])
+       
+        sim = emulate(prob, ntraj; report_error = true, ensemble_algo = ensemble_algo)
+        amps = sim.amps
+        amps_err = sim.twosigma
+
+        if shots == 0
+            res = [[_expectation_value_noisy(prob.confusion_mat, a, e, err) for (a, err) in zip(amps, amps_err)] for e in expectations]
+            expec, perr = [[[a[i] for a in e] for e in res] for i in 1:2]
+            return if report_error
+                (
+                    expectations = expec,
+                    propagated_error = perr
+                )
+            else
+                return expec
+            end
+        else
+            res = [[_expectation_value_noisy(prob.confusion_mat, a, e, err, shots) for (a, err) in zip(amps, amps_err)] for e in expectations]
+            mval, sample_err, err = [[[a[i] for a in e] for e in res] for i in 1:3]
+            return if report_error
+                (
+                    expectations = mval,
+                    shot_error = sample_err,
+                    propagated_err = err
+                )
+            else
+                return mval
+            end
+        end
     end
 end
 
@@ -338,13 +374,48 @@ over the series of save times.
 function simulation_series_mean(sim, index = false)
     ntraj = length(sim)
     times = length(sim[1])
-    if index == false; index = 1:length(sim[1][1]); end
-    [mean([sim[i][t][index] for i in 1:ntraj]) for t in 1:times]
+    if index == false
+        [mean([sim[i][t] for i in 1:ntraj]) for t in 1:times]
+    else
+        [mean([sim[i][t][index] for i in 1:ntraj]) for t in 1:times]
+    end
 end
 
 function simulation_series_err(sim, index = false, factor = 2)
     ntraj = length(sim)
     times = length(sim[1])
-    if index == false; index = 1:length(sim[1][1]); end
-    [factor*std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+    if index == false
+        [factor*std([sim[i][t] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+    else
+        [factor*std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+    end
+end
+
+function _expectation_value_noisy(
+    cmat,
+    amps,
+    op::Diagonal,
+    errs::Vector
+)
+    expec = sum([a * real(n) for (a,n) in zip(cmat * amps, op.diag)])
+    (
+        expec,
+        sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
+    )
+end
+
+function _expectation_value_noisy(
+    cmat,
+    amps,
+    op::Diagonal,
+    errs::Vector,
+    shots::Int
+)
+    w = Weights(cmat * amps) #create weights representing measurement probabilities
+    S = [real(op.diag[sample(w)]) for i in 1:shots]
+    (
+        mean(S),
+        2*std(S)/sqrt(shots),
+        sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
+    )
 end

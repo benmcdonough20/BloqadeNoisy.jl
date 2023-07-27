@@ -18,11 +18,13 @@ using LinearAlgebra
 
 export NoisySchrodingerEquation, 
     NoisySchrodingerProblem,
+    ErrorModel,
     Aquila,
     measure_noisy,
     emulate,
-    expec_series_mean,
-    expec_series_err
+    simulation_series_mean,
+    simulation_series_err,
+    randomize
 
 include("error_model.jl")
 include("noise_models.jl")
