@@ -23,13 +23,3 @@ More information about the stochastic wavefunction method implemented can be fou
 ## Further development
 - Improve memory allocation
 - Run on GPU
-
-## Dependencies
-- Julia 1.9.1
-- Bloqade v0.1.24
-- StatsBase v0.33.21
-- SparseArrays
-- Kronecker v0.5.4
-- DifferentialEquations v7.8.0
-- StatsBase v0.33.21
-- Yao v0.8.9
