@@ -1,14 +1,14 @@
 #TODO: These constants should be configurable, maybe via JSON?
 p01 = 0.01
 p10 = 0.08
-relaxation_rate =0# 1/100
+relaxation_rate = 1/100
 dephasing_rate = 1/10
 relax_op = (X+im*Y)/2
 δΩrel = 0#0.001
-δΔ = 0#0.18
+δΔ = 0.18
 δx = 0.05
 δy = 0.05
-δΔ_inhom =0# 0.37
+δΔ_inhom = 0.37
 δΩ_inhom = 0#0.001
 
 function _aquila_coherent_noisy(h)

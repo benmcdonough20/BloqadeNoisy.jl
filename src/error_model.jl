@@ -1,5 +1,6 @@
 using Kronecker
 using LinearAlgebra
+using StatsBase
 """
     struct ErrorModel
 
@@ -32,33 +33,54 @@ function measure_noisy
 - nshots (optional kwarg): number of measurements to return
 """
 function measure_noisy(
-    u::Vector, 
     noise_model::ErrorModel, 
+    amps::Vector{Real}, 
     sites=nothing; 
     nshots::Int = 1
     )
-    nqubits = round(Int,log2(length(u)))
+    nqubits = round(Int,log2(length(amps)))
     cmat = noise_model.confusion_mat(nqubits) #generate confusion matrix
-    w = Weights(cmat * abs.(u).^2) #create weights representing measurement probabilities
-    return if site === nothing
-        [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits)) for i in 1:nshots]
+    w = Weights(cmat * amps) #create weights representing measurement probabilities
+    if sites === nothing; sites = 1:length(amps); end
+    [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits)) for i in 1:nshots]
+end
+
+function expectation_value_noisy(
+   noise_model::ErrorModel,
+   amps::Vector{T} where T <: Real,
+   op::Diagonal;
+   errs = nothing
+)
+    nqubits = round(Int,log2(length(amps)))
+    cmat = noise_model.confusion_mat(nqubits) #generate confusion matrix
+    expec = sum([a * real(n) for (a,n) in zip(cmat * amps, op.diag)])
+    return if errs === nothing
+        expec
     else
-        try
-            [DitStr{2}(digits(sample(w) .- 1; base = 2, pad = nqubits))[sites] for i in 1:nshots]
-        catch BoundsError
-            error("Site(s) not in range")
-        end
+        (
+            expectation = expec,
+            propagated_err = sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
+        )
     end
 end
 
-function rydberg_density_noisy_shots(
-   u::Vector,
+function expectation_value_noisy(
    noise_model::ErrorModel,
+   amps::Vector{T} where T <: Real,
    op::Diagonal,
-   shots
+   shots;
+   errs = false
 )
-    nqubits = round(Int,log2(length(u)))
+    nqubits = round(Int,log2(length(amps)))
     cmat = noise_model.confusion_mat(nqubits) #generate confusion matrix
-    w = Weights(cmat * abs.(u).^2) #create weights representing measurement probabilities
-    sum([op.diag[sample(w)] for i in 1:shots])/shots
+    w = Weights(cmat * amps) #create weights representing measurement probabilities
+    S = [real(op.diag[sample(w)]) for i in 1:shots]
+    return if errs === true
+        mean(S)
+    else
+        (
+            expectation = mean(S),
+            sample_err = 2*std(S)/sqrt(shots)
+        )
+    end
 end

@@ -178,7 +178,16 @@ function collapse!(integrator, L_ops)
     integrator.p = rand()
 end
 
-function rebuild(prob::NoisySchrodingerProblem, p, h)
+"""
+    function randomize
+
+Used to randomly modify the parameters of the Hamiltonian and randomly
+change the initial condition, producing another NoisySchrodingerProblem object
+representing a new trajectory.
+"""
+function randomize(prob::NoisySchrodingerProblem)
+    h = prob.coherent_noise()
+    p = rand()
     space = YaoSubspaceArrayReg.space(prob.reg)
     T = real(eltype(prob.state))
     T = isreal(h) ? T : Complex{T}
@@ -264,58 +273,56 @@ Emulate the evolution of a noisy system
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int;
-    expectations = [],
-    output_func = u -> u,
-    ensemble_algo = EnsembleSerial(),
+    report_error = false,
+    ensemble_algo = EnsembleSerial()
 )
 
-    @assert all(isreal.(expectations)) #check that expectation operators are real
-
-    prob_func(prob, i, repeat) = rebuild(prob, rand(), prob.coherent_noise())
-
-    if !isempty(expectations)
-        output_func = (u) -> [real(u' * e * u) for e in expectations]
+    output_func = sol -> [abs.(u).^2 for u in sol]
+    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
+    return if report_error
+        (
+            amps = simulation_series_mean(sim),
+            twosigma = simulation_series_err(sim)
+        )
+    else
+        simulation_series_mean(sim)
     end
-
-    #IMPORTANT: see ContinuousCallback documentation. Because integrator state is saved before and after callback is triggered
-    #for accuracy, the timeseries end up being different lengths. This is why interpolation is used, but maybe there is a better solution
-    ensemble_prob = EnsembleProblem(prob, prob_func = prob_func, output_func = (sol, i) -> ([output_func(normalize(sol(t))) for t in prob.save_times], false))
-    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
 end
 
-"""
-    function emulate
-Emulate the evolution of a noisy system
-# Arguments
-- prob: NoisySchrodingerProblem to emulate
-- ntraj: number of trajectories to use for simulation
-- noisy_expectations: Vector of operators that are diagonal in computational basis 
-- shots: If specified, the noisy_expectation values will be taken with simulated shots
-"""
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int,
-    noisy_expectations::Vector{T} where T <: Diagonal;
-    shots = nothing,
-    kw...
+    output_func::Function;
+    ensemble_algo = EnsembleSerial()
+)
+    ensemble_prob = EnsembleProblem(
+        prob, 
+        prob_func = (prob, i, repeat)->randomize(prob), 
+        output_func = (sol, i) -> (output_func([normalize(sol(t)) for t in prob.save_times]),false)
+    )
+    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
+end
+
+function emulate(
+    prob::NoisySchrodingerProblem,
+    ntraj::Int,
+    expectations::Array;
+    report_error = false,
+    ensemble_algo = EnsembleSerial()
 )
 
-    @assert all(isreal.(noisy_expectations)) #check that expectation operators are real
-
-    if shots === nothing
-        output_func = (u) -> [sum([real(e.diag[n]) * p for (n,p) in enumerate(prob.confusion_mat * abs.(u).^2)]) for e in noisy_expectations]
-        emulate(prob, ntraj; output_func = output_func, kw...)
-    else
-        sim = emulate(prob, ntraj; output_func = u -> abs.(u)^2, kw...) #get probability amplitudes
-        prob_amps = expec_series_mean(sim, 1:length(prob.u0)) #average probabilitiy amplitdues
-        expec_shots(e, p) = (
-            w = Weights(prob.confusion_mat * p); #create weights and apply confusion matrix
-            mean([real(e.diag[sample(w)]) for i in 1:shots]) #sample expectation value
+    @assert all(isreal.(expectations))
+    output_func = (sol) -> [[real(u' * e * u) for e in expectations] for u in sol]
+    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
+    
+    return if report_error
+        (
+            expectations = [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)],
+            twosigma = [simulation_series_err(sim, i) for (i,_) in enumerate(expectations)]
         )
-        #output format is a timeseries list for each expectation value
-        return [[expec_shots(e, p) for p in prob_amps] for e in noisy_expectations]
-    end 
-
+    else
+        [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)]
+    end
 end
 
 """
@@ -328,14 +335,16 @@ over the series of save times.
 - sim: EnsembleSolution, result of calling `emulate`
 - index: index of the expectation value in the array provided
 """
-function expec_series_mean(sim, index)
+function simulation_series_mean(sim, index = false)
     ntraj = length(sim)
     times = length(sim[1])
+    if index == false; index = 1:length(sim[1][1]); end
     [mean([sim[i][t][index] for i in 1:ntraj]) for t in 1:times]
 end
 
-function expec_series_err(sim, index)
+function simulation_series_err(sim, index = false, factor = 2)
     ntraj = length(sim)
     times = length(sim[1])
-    [std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+    if index == false; index = 1:length(sim[1][1]); end
+    [factor*std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
 end
