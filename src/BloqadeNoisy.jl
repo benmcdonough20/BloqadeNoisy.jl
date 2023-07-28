@@ -10,9 +10,11 @@ using Kronecker
 using DiffEqCallbacks
 using SparseArrays
 using StatsBase
+import Base.+
 @reexport using BloqadeExpr
 @reexport using BloqadeODE
 @reexport using OrdinaryDiffEq
+using BloqadeWaveforms: Waveform
 using BloqadeExpr: Hamiltonian
 using LinearAlgebra
 
