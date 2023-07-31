@@ -1,15 +1,15 @@
 #TODO: These constants should be configurable, maybe via JSON?
 p01 = 0.01
 p10 = 0.08
-relaxation_rate = 1/50
-dephasing_rate = 1/30
+relaxation_rate = 1/100 #estimated based on data
+dephasing_rate = 1/50 #estimated based on data
 relax_op = (X+im*Y)/2
 δΩrel = 0.008
 δΔ = 0.18
 δx = 0.05
 δy = 0.05
-δΔ_inhom = 0.37
-δΩ_inhom = 0.015
+δΔ_inhom = 0.50 #changed from 0.37
+δΩ_inhom = 0.018 #changed from .02 (number density is sensitive to this parameter)
 
 #add waveforms and numbers
 function Base.:+(a::Float64, b::Waveform)

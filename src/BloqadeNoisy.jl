@@ -15,7 +15,7 @@ import Base.+
 @reexport using BloqadeODE
 @reexport using OrdinaryDiffEq
 using BloqadeWaveforms: Waveform
-using BloqadeExpr: Hamiltonian
+using BloqadeExpr: Hamiltonian, get_rydberg_params
 using LinearAlgebra
 
 export NoisySchrodingerEquation, 
