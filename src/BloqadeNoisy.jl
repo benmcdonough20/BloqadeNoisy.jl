@@ -10,6 +10,7 @@ using Kronecker
 using DiffEqCallbacks
 using SparseArrays
 using StatsBase
+using JSON
 import Base.+
 @reexport using BloqadeExpr
 @reexport using BloqadeODE
@@ -26,7 +27,8 @@ export NoisySchrodingerEquation,
     emulate,
     simulation_series_mean,
     simulation_series_err,
-    randomize
+    randomize,
+    load_error_model
 
 include("error_model.jl")
 include("noise_models.jl")

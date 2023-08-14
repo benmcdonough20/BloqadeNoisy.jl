@@ -1,5 +1,6 @@
 using Bloqade
 using BloqadeNoisy
+
 using LaTeXStrings
 using Plots
 using CSV

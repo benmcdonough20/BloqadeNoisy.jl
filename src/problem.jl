@@ -1,28 +1,28 @@
 """
-    struct NoiseSchrodingerEquation
+    struct NoisySchrodingerEquation
 
 Decorator object for SchrodingerEquation. Implements the f(dstate, state, p, t)
 interface to fit into a standard ODE Problem.
 
 # Arguments
 
-- equation: The coherent equation for the problem
-- imag_evo: ∑_L L^†L for collapse operators L which defines the non-hermitian part of the Hamiltonian
-- num_cops: number of collapse operators (for displaying)
+- `equation`: The coherent 'SchrodingerEquation` equation for the problem
+- `imag_evo`: ∑_L L^†L for collapse operators L which defines the non-hermitian part of the Hamiltonian
+- `num_cops``: number of collapse operators (for displaying)
 """
-struct NoisySchrodingerEquation{T<:SparseMatrixCSC}
-    equation::SchrodingerEquation
-    imag_evo::T
+struct NoisySchrodingerEquation{mType<:SparseMatrixCSC}
+    equation::SchrodingerEquation #Wraps this SchrodingerEquation
+    imag_evo::mType #anti-hermitian part of the Hamiltonian
     num_cops::Int
 end
 
 function (eq::NoisySchrodingerEquation)(dstate, state, p, t::Number)
-    eq.equation(dstate, state, p, t)
+    eq.equation(dstate, state, p, t) #d/dt|ψ> = -iH|ψ> - .5∑_L L^†L|ψ>
     mul!(dstate, eq.imag_evo, state, -.5, one(t))
     return
 end
 
-function Base.show(io::IO, mime::MIME"text/plain", eq::NoisySchrodingerEquation)
+function Base.show(io::IO, mime::MIME"text/plain", eq::NoisySchrodingerEquation) #Pretty printing
     Base.show(io, mime, eq.equation) 
     printstyled(io, "collapse operators: ", length(eq.num_cops); color = :yellow)
     return println(io)
@@ -33,13 +33,14 @@ end
     NoisySchrodingerEquation(reg, tspan, hamiltonian, c_ops; kw...)
     NoisySchrodingerEquation(reg, tspan, hamiltonian, noise_model; kw...)
 
-Define an ODE Problem representing a single noisy trajectory of an open system
+Define an ODE Problem representing a single noisy trajectory in an open system in the weak-coupling limit
 
 # Arguments
 
-- reg: evolution register and initial state of the problem
-- tspan: either (start, stop) or the end time
-- hamiltonian: AbstractBlock representing evolution hamiltonian, must be compatible with noise model
+- `reg`: evolution register and initial state of the problem
+- `tspan`: a vector of times at which to save the simulation 
+- `hamiltonian`: AbstractBlock such as that produced by `rydberg_h`` 
+    representing evolution hamiltonian
 """
 struct NoisySchrodingerProblem{Reg,EquationType<:ODEFunction,uType,tType,Algo,Kwargs} <:
        SciMLBase.AbstractODEProblem{uType,tType,true}
@@ -57,22 +58,45 @@ struct NoisySchrodingerProblem{Reg,EquationType<:ODEFunction,uType,tType,Algo,Kw
     p::Real
 end
 
-#internal constructor
+#internal constructor with all of the options
 function NoisySchrodingerProblem(
     reg::AbstractRegister,
     save_times,
     expr,
     c_ops::Vector{T} where T <: SparseMatrixCSC,
     coherent_noise::Function,
-    confusion_mat; #TODO: type checking
-    algo=DP8()
+    confusion_mat; #TODO: property checking. Needs to support matrix-vector multiplication
+    algo=DP8(), #Algorithm that was used for testing
+    kw... #proceed with caution, some kwargs might break things
 )
     nqudits(reg) == nqudits(expr) || throw(ArgumentError("number of qubits/sites does not match!"))
 
+    issorted(save_times) || throw(ArgumentError("save_times must be sorted"))
     tspan = (first(save_times), last(save_times))
 
-    state = statevec(reg)
-    space = YaoSubspaceArrayReg.space(reg)
+    state = statevec(reg) #get initial statevector
+    space = YaoSubspaceArrayReg.space(reg) #BloqadeNoisy does not currently support subspaces
+
+    #type check c_ops
+    try
+        if length(c_ops) != 0
+            [c^2 * state for c in c_ops] #making sure matrix-vector product works and matrix is square
+        end
+    catch
+        throw(ArgumentError("Collapse operators are either not square or do not match register type"))
+    end
+
+    #type check confusion_mat
+    try
+        confusion_mat^2 * abs.(state).^2 #check that matrix-vector product works and matrix is square
+    catch
+        throw(ArgumentError("Confusion matrix does not match register type"))
+    end
+
+    #type check coherent noise
+    test_hamiltonian_sample = coherent_noise()
+    typeof(test_hamiltonian_sample) == typeof(expr) || throw(ArgumentError("Coherent noise sample is not compatible with Hamiltonian"))
+    nqudits(test_hamiltonian_sample) == nqudits(expr) || throw(ArgumentError("Coherent noise sample is not compatible with Hamiltonian"))
 
     T = real(eltype(state))
     T = isreal(expr) ? T : Complex{T}
@@ -80,7 +104,7 @@ function NoisySchrodingerProblem(
         SchrodingerEquation(
             expr, Hamiltonian(T, expr,space)
         ),
-        sum([l'*l for l in c_ops]),
+        SparseMatrixCSC(zeros(length(state), length(state)) + sum([l'*l for l in c_ops])),
         length(c_ops)
     )
     ode_f = ODEFunction(eq)
@@ -94,14 +118,17 @@ function NoisySchrodingerProblem(
     ) 
 
     #remove save_start and sate_on options to allow saving at specified times
-    ode_options = pairs((
-        save_everystep = false,
+    ode_options = (
+        save_everystep = false, #save only at designated save_times, improves performance
+        save_start = true,
         dense = false,
         reltol=1e-10,
         abstol=1e-10,
         saveat=save_times,
         callback = jump_cb #quantum jumps
-    ))
+    )
+
+    kw = pairs(merge(ode_options, kw))
 
     return NoisySchrodingerProblem(
         reg,
@@ -114,13 +141,13 @@ function NoisySchrodingerProblem(
         coherent_noise,
         confusion_mat,
         save_times,
-        ode_options,
+        kw,
         rand(), #random initial condition
     )
 end
 
-function NoisySchrodingerProblem(
-    reg,
+function NoisySchrodingerProblem( #Generic simulation with collapse operators
+    reg::ArrayReg,
     save_times,
     h, 
     c_ops::Array;
@@ -132,12 +159,12 @@ function NoisySchrodingerProblem(
        h,
        c_ops,
        () -> h,
-       () -> nothing;
+       Matrix(I, 2^nqubits(reg), 2^nqubits(reg));
        kw...
     )
 end
 
-function NoisySchrodingerProblem(
+function NoisySchrodingerProblem( #Simulation based on NoiseModel
     reg::ArrayReg,
     save_times,
     h::AbstractBlock,
@@ -155,11 +182,11 @@ function NoisySchrodingerProblem(
     )
 end
 
-function collapse_condition(u, t, integrator)
+function collapse_condition(u, t, integrator) #condition for continuous callback
     norm(u)^2 - integrator.p
 end
 
-function collapse!(integrator, L_ops)
+function collapse!(integrator, L_ops) #trigger a quantum jump
     dp = 0
     l = length(L_ops)
     probs = Vector{Float64}(undef, l)
@@ -175,7 +202,7 @@ function collapse!(integrator, L_ops)
             break
         end
     end
-    integrator.p = rand()
+    integrator.p = rand() #randomize for next jump
 end
 
 """
@@ -183,7 +210,7 @@ end
 
 Used to randomly modify the parameters of the Hamiltonian and randomly
 change the initial condition, producing another NoisySchrodingerProblem object
-representing a new trajectory.
+representing a new trajectory. This is a replacement for SciML remake
 """
 function randomize(prob::NoisySchrodingerProblem)
     h = prob.coherent_noise()
@@ -215,7 +242,7 @@ function randomize(prob::NoisySchrodingerProblem)
     )
 end
 
-function Base.show(io::IO, mime::MIME"text/plain", prob::NoisySchrodingerProblem)
+function Base.show(io::IO, mime::MIME"text/plain", prob::NoisySchrodingerProblem) #pretty printing
     indent = get(io, :indent, 0)
     tab(indent) = " "^indent
 
@@ -241,6 +268,12 @@ function Base.show(io::IO, mime::MIME"text/plain", prob::NoisySchrodingerProblem
     println(io, tab(indent + 4), "algorithm: ", repr(prob.algo))
 end
 
+"""
+    function solve
+
+This method should generally not be called directly unless you are implementing your own EnsembleProblem. This Implements
+the DifferentialEquations interface for NoisySchrodingerProblem, which represents a single quantum trajectory.
+"""
 function DiffEqBase.solve(prob::NoisySchrodingerProblem, args...; sensealg = nothing, initial_state = nothing, kw...)
     if sensealg === nothing && haskey(prob.kwargs, :sensealg)
         sensealg = prob.kwargs[:sensealg]
@@ -261,14 +294,15 @@ DiffEqBase.get_concrete_problem(prob::NoisySchrodingerProblem, isadapt; kw...) =
 """
     function emulate
 
-Emulate the evolution of a noisy system
+Emulate the evolution of a noisy system by averaging over an ensemble of ntraj noisy trajectories. The output is an array
+where each array contains the output of output_func on the timeseries corresponding to a single trajectory.
 
 # Arguments
-- prob: NoisySchrodingerProblem to emulate
-- ntraj: number of trajectories to use for simulation
-- expectations: Matrices representing observables
-- output_func: Vector{Complex}->Any - Transformation of the statevector to save
-- ensemble_algo: See EnsembleProblem documentation. Common choices are EnsembleSerial and EnsembleThreaded
+
+- `prob`: NoisySchrodingerProblem to emulate
+- `ntraj`: number of trajectories to use for simulation
+- `output_func`: Vector{Complex}->Any - Transformation of the statevector array to save
+- `ensemble_algo`: See EnsembleProblem documentation. Common choices are EnsembleSerial and EnsembleThreaded
 """
 function emulate(
     prob::NoisySchrodingerProblem,
@@ -284,6 +318,17 @@ function emulate(
     solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
 end
 
+"""
+    function emulate
+
+Emulate an ensemble and return the ensemble average over bitstring distribution.
+
+# Arguments
+- `prob`: NoisySchrodingerProblem
+- `ntraj`: Number of trajectories
+- `report_error`: Returns 2σ estimated from the sample
+- `ensemble_algo`: What type of parallelization is desired. See EnsembleSimulation documentation
+"""
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int;
@@ -291,8 +336,8 @@ function emulate(
     ensemble_algo = EnsembleSerial()
 )
 
-    output_func = sol -> [abs.(u).^2 for u in sol]
-    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
+    output_func = sol -> [abs.(u).^2 for u in sol] #store the probability distribution
+    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo) #call up
     return if report_error
         (
             amps = simulation_series_mean(sim),
@@ -303,6 +348,19 @@ function emulate(
     end
 end
 
+"""
+    function emulate
+
+Emulate an ensemble and return the ensemble average of a set of expectation values
+
+# Arguments
+- `prob`: NoisySchrodingerProblem
+- `ntraj`: Number of trajectories
+- `expectations`: Set of Hermitian operators representing observables. Matrix-like objects
+- `shots`: Whether to resample the solution at a fixed number of shots. No resamping if `shots = 0``
+- `report_error`: Returns 2σ estimated from the sample. Requires expectation values to be diagonal in computational basis
+- `ensemble_algo`: What type of parallelization is desired. See EnsembleSimulation documentation
+"""
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int,
@@ -313,9 +371,9 @@ function emulate(
     ensemble_algo = EnsembleSerial()
 )
 
-    @assert all(ishermitian.(expectations))
+    @assert all(ishermitian.(expectations)) #observables are hermitian!
     
-    if !readout_error
+    if !readout_error #Was not sure how to do this cleanly because multiple dispatch does not account for different kwargs...
         output_func = (sol) -> [[real(u' * (e * u)) for e in expectations] for u in sol]
         sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
     
@@ -334,7 +392,7 @@ function emulate(
         amps = sim.amps
         amps_err = sim.twosigma
 
-        if shots == 0
+        if shots == 0 #no resampling
             res = [[_expectation_value_noisy(prob.confusion_mat, a, e, err) for (a, err) in zip(amps, amps_err)] for e in expectations]
             expec, perr = [[[a[i] for a in e] for e in res] for i in 1:2]
             return if report_error
@@ -381,6 +439,16 @@ function simulation_series_mean(sim, index = false)
     end
 end
 
+"""
+    function expec_series_err
+
+Convenience method to estimate the sampling error in the ensemble solution
+
+# Arguments
+- `sim`: EnsembleSolution, result of calling `emulate`
+- `index`: index of the expectation value in the array provided
+- `factor`: 
+"""
 function simulation_series_err(sim, index = false, factor = 2)
     ntraj = length(sim)
     times = length(sim[1])
@@ -412,10 +480,11 @@ function _expectation_value_noisy(
     shots::Int
 )
     w = Weights(cmat * amps) #create weights representing measurement probabilities
-    S = [real(op.diag[sample(w)]) for i in 1:shots]
+    samples = sample(1:length(amps), w, shots)
+    S = [real(op.diag[s]) for s in samples]
     (
         mean(S),
-        2*std(S)/sqrt(shots),
+        2*std(S)/sqrt(shots), #Using 2σ because 95% of the data is within this error
         sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
     )
 end
