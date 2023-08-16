@@ -1,25 +1,28 @@
 # BloqadeNoisy
 
-A framework for stochastic wavefunction simulations of open quantum systems in Bloqade.
+Bloqade Noisy stochastic wave function-based noisy dynamics simulator.
 
-## Features
-- Coherent noise
-- Readout error
-- Incoherent noise
-- Custom code injection
-- Custom noise models
-- Parallel processing
+## Installation
 
-## Usage
+<p>
+BloqadeNoisy is a &nbsp;
+    <a href="https://julialang.org">
+        <img src="https://raw.githubusercontent.com/JuliaLang/julia-logo-graphics/master/images/julia.ico" width="16em">
+        Julia Language
+    </a>
+    &nbsp; package. To install BloqadeNoisy,
+    please <a href="https://docs.julialang.org/en/v1/manual/getting-started/">open
+    Julia's interactive session (known as REPL)</a> and press <kbd>]</kbd> key in the REPL to use the package mode, and then type the following command:
+</p>
 
-See `tutorials/tutorial.ipynb` for a demonstration of functionality.
+For stable release:
 
-## Background
+```julia
+pkg> add BloqadeNoisy
+```
 
-More information about the stochastic wavefunction method implemented can be found at the following resources:
-- [qutip mcsolve documentation](https://qutip.org/docs/latest/guide/dynamics/dynamics-monte.html)
-- [Lukin course notes ch. 6](https://lukin.physics.harvard.edu/files/lukin/files/physics_285b_lecture_notes.pdf)
+For current master:
 
-## Further development
-- Improve memory allocation
-- Run on GPU
+```julia
+pkg> add BloqadeNoisy#master
+```

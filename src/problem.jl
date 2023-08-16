@@ -18,13 +18,13 @@ end
 
 function (eq::NoisySchrodingerEquation)(dstate, state, p, t::Number)
     eq.equation(dstate, state, p, t) #d/dt|ψ> = -iH|ψ> - .5∑_L L^†L|ψ>
-    mul!(dstate, eq.imag_evo, state, -.5, one(t))
+    mul!(dstate, eq.imag_evo, state, -0.5, one(t))
     return
 end
 
 function Base.show(io::IO, mime::MIME"text/plain", eq::NoisySchrodingerEquation) #Pretty printing
-    Base.show(io, mime, eq.equation) 
-    printstyled(io, "collapse operators: ", length(eq.num_cops); color = :yellow)
+    Base.show(io, mime, eq.equation)
+    printstyled(io, "collapse operators: ", length(eq.num_cops); color=:yellow)
     return println(io)
 end
 
@@ -82,7 +82,7 @@ function NoisySchrodingerProblem(
         if length(c_ops) != 0
             [c^2 * state for c in c_ops] #making sure matrix-vector product works and matrix is square
         else
-            c_ops = [0*I]
+            c_ops = [0 * I]
         end
     catch
         throw(ArgumentError("Collapse operators are either not square or do not match register type"))
@@ -90,7 +90,7 @@ function NoisySchrodingerProblem(
 
     #type check confusion_mat
     try
-        confusion_mat^2 * abs.(state).^2 #check that matrix-vector product works and matrix is square
+        confusion_mat^2 * abs.(state) .^ 2 #check that matrix-vector product works and matrix is square
     catch
         throw(ArgumentError("Confusion matrix does not match register type"))
     end
@@ -104,9 +104,9 @@ function NoisySchrodingerProblem(
     T = isreal(expr) ? T : Complex{T}
     eq = NoisySchrodingerEquation(
         SchrodingerEquation(
-            expr, Hamiltonian(T, expr,space)
+            expr, Hamiltonian(T, expr, space)
         ),
-        sum([l'*l for l in c_ops]),
+        sum([l' * l for l in c_ops]),
         length(c_ops)
     )
     ode_f = ODEFunction(eq)
@@ -116,18 +116,18 @@ function NoisySchrodingerProblem(
 
     jump_cb = ContinuousCallback( #trigger quantum jumps and collapse the state
         collapse_condition,
-        (integrator)->collapse!(integrator, c_ops),
-    ) 
+        (integrator) -> collapse!(integrator, c_ops),
+    )
 
     #remove save_start and sate_on options to allow saving at specified times
     ode_options = (
-        save_everystep = false, #save only at designated save_times, improves performance
-        save_start = true,
-        dense = false,
+        save_everystep=false, #save only at designated save_times, improves performance
+        save_start=true,
+        dense=false,
         reltol=1e-10,
         abstol=1e-10,
         saveat=save_times,
-        callback = jump_cb #quantum jumps
+        callback=jump_cb #quantum jumps
     )
 
     kw = pairs(merge(ode_options, kw))
@@ -151,18 +151,18 @@ end
 function NoisySchrodingerProblem( #Generic simulation with collapse operators
     reg::ArrayReg,
     save_times,
-    h, 
+    h,
     c_ops::Array;
     kw...
 )
     return NoisySchrodingerProblem(
-       reg,
-       save_times,
-       h,
-       c_ops,
-       () -> h,
-       Matrix(I, 2^nqubits(reg), 2^nqubits(reg));
-       kw...
+        reg,
+        save_times,
+        h,
+        c_ops,
+        () -> h,
+        Matrix(I, 2^nqubits(reg), 2^nqubits(reg));
+        kw...
     )
 end
 
@@ -198,8 +198,8 @@ function collapse!(integrator, L_ops) #trigger a quantum jump
     end
     r = rand()
     for i in 1:l
-        if r <= probs[i]/dp #choose jump based on r
-            copy!(integrator.u, L_ops[i]*integrator.u) #jump
+        if r <= probs[i] / dp #choose jump based on r
+            copy!(integrator.u, L_ops[i] * integrator.u) #jump
             normalize!(integrator.u) #normalize
             break
         end
@@ -224,7 +224,7 @@ function randomize(prob::NoisySchrodingerProblem)
         SchrodingerEquation(
             h, Hamiltonian(T, h, space)
         ),
-        sum([l'*l for l in prob.c_ops]),
+        sum([l' * l for l in prob.c_ops]),
         length(prob.c_ops)
     )
     ode_f = ODEFunction(eq)
@@ -252,11 +252,11 @@ function Base.show(io::IO, mime::MIME"text/plain", prob::NoisySchrodingerProblem
     # state info
     println(io, tab(indent + 2), "register info:")
     print(io, tab(indent + 4), "type: ")
-    printstyled(io, typeof(prob.reg); color = :green)
+    printstyled(io, typeof(prob.reg); color=:green)
     println(io)
 
     print(io, tab(indent + 4), "storage size: ")
-    printstyled(io, Base.format_bytes(storage_size(prob.reg)); color = :yellow)
+    printstyled(io, Base.format_bytes(storage_size(prob.reg)); color=:yellow)
     println(io)
     println(io)
 
@@ -276,7 +276,7 @@ end
 This method should generally not be called directly unless you are implementing your own EnsembleProblem. This Implements
 the DifferentialEquations interface for NoisySchrodingerProblem, which represents a single quantum trajectory.
 """
-function DiffEqBase.solve(prob::NoisySchrodingerProblem, args...; sensealg = nothing, initial_state = nothing, kw...)
+function DiffEqBase.solve(prob::NoisySchrodingerProblem, args...; sensealg=nothing, initial_state=nothing, kw...)
     if sensealg === nothing && haskey(prob.kwargs, :sensealg)
         sensealg = prob.kwargs[:sensealg]
     end
@@ -310,14 +310,14 @@ function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int,
     output_func::Function;
-    ensemble_algo = EnsembleSerial()
+    ensemble_algo=EnsembleSerial()
 )
     ensemble_prob = EnsembleProblem(
-        prob, 
-        prob_func = (prob, i, repeat)->randomize(prob), 
-        output_func = (sol, i) -> (output_func([normalize(sol(t)) for t in prob.save_times]),false)
+        prob,
+        prob_func=(prob, i, repeat) -> randomize(prob),
+        output_func=(sol, i) -> (output_func([normalize(sol(t)) for t in prob.save_times]), false)
     )
-    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories = ntraj)
+    solve(ensemble_prob, prob.algo, ensemble_algo, trajectories=ntraj)
 end
 
 """
@@ -334,16 +334,16 @@ Emulate an ensemble and return the ensemble average over bitstring distribution.
 function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int;
-    report_error = false,
-    ensemble_algo = EnsembleSerial()
+    report_error=false,
+    ensemble_algo=EnsembleSerial()
 )
 
-    output_func = sol -> [abs.(u).^2 for u in sol] #store the probability distribution
-    sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo) #call up
+    output_func = sol -> [abs.(u) .^ 2 for u in sol] #store the probability distribution
+    sim = emulate(prob, ntraj, output_func; ensemble_algo=ensemble_algo) #call up
     return if report_error
         (
-            amps = simulation_series_mean(sim),
-            twosigma = simulation_series_err(sim)
+            amps=simulation_series_mean(sim),
+            twosigma=simulation_series_err(sim)
         )
     else
         simulation_series_mean(sim)
@@ -367,30 +367,30 @@ function emulate(
     prob::NoisySchrodingerProblem,
     ntraj::Int,
     expectations::Array;
-    readout_error = false,
-    shots = 0,
-    report_error = false,
-    ensemble_algo = EnsembleSerial()
+    readout_error=false,
+    shots=0,
+    report_error=false,
+    ensemble_algo=EnsembleSerial()
 )
 
     @assert all(ishermitian.(expectations)) #observables are hermitian!
-    
+
     if !readout_error #Was not sure how to do this cleanly because multiple dispatch does not account for different kwargs...
         output_func = (sol) -> [[real(u' * (e * u)) for e in expectations] for u in sol]
-        sim = emulate(prob, ntraj, output_func; ensemble_algo = ensemble_algo)
-    
+        sim = emulate(prob, ntraj, output_func; ensemble_algo=ensemble_algo)
+
         return if report_error
             (
-                expectations = [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)],
-                twosigma = [simulation_series_err(sim, i) for (i,_) in enumerate(expectations)]
+                expectations=[simulation_series_mean(sim; index = i) for (i, _) in enumerate(expectations)],
+                twosigma=[simulation_series_err(sim; index = i) for (i, _) in enumerate(expectations)]
             )
         else
-            [simulation_series_mean(sim, i) for (i,_) in enumerate(expectations)]
+            [simulation_series_mean(sim; index=i) for (i, _) in enumerate(expectations)]
         end
     else
         @assert all([typeof(e) <: Diagonal for e in expectations])
-       
-        sim = emulate(prob, ntraj; report_error = true, ensemble_algo = ensemble_algo)
+
+        sim = emulate(prob, ntraj; report_error=true, ensemble_algo=ensemble_algo)
         amps = sim.amps
         amps_err = sim.twosigma
 
@@ -399,8 +399,8 @@ function emulate(
             expec, perr = [[[a[i] for a in e] for e in res] for i in 1:2]
             return if report_error
                 (
-                    expectations = expec,
-                    propagated_error = perr
+                    expectations=expec,
+                    propagated_error=perr
                 )
             else
                 return expec
@@ -410,9 +410,9 @@ function emulate(
             mval, sample_err, err = [[[a[i] for a in e] for e in res] for i in 1:3]
             return if report_error
                 (
-                    expectations = mval,
-                    shot_error = sample_err,
-                    propagated_err = err
+                    expectations=mval,
+                    shot_error=sample_err,
+                    propagated_err=err
                 )
             else
                 return mval
@@ -431,7 +431,7 @@ over the series of save times.
 - sim: EnsembleSolution, result of calling `emulate`
 - index: index of the expectation value in the array provided
 """
-function simulation_series_mean(sim, index = false)
+function simulation_series_mean(sim; index=false)
     ntraj = length(sim)
     times = length(sim[1])
     if index == false
@@ -449,15 +449,15 @@ Convenience method to estimate the sampling error in the ensemble solution
 # Arguments
 - `sim`: EnsembleSolution, result of calling `emulate`
 - `index`: index of the expectation value in the array provided
-- `factor`: 
+- `factor`: How many σ from the mean to report
 """
-function simulation_series_err(sim, index = false, factor = 2)
+function simulation_series_err(sim; index=false, factor=2)
     ntraj = length(sim)
     times = length(sim[1])
     if index == false
-        [factor*std([sim[i][t] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+        [factor * std([sim[i][t] for i in 1:ntraj]) / sqrt(ntraj) for t in 1:times]
     else
-        [factor*std([sim[i][t][index] for i in 1:ntraj])/sqrt(ntraj) for t in 1:times]
+        [factor * std([sim[i][t][index] for i in 1:ntraj]) / sqrt(ntraj) for t in 1:times]
     end
 end
 
@@ -467,10 +467,10 @@ function _expectation_value_noisy(
     op::Diagonal,
     errs::Vector
 )
-    expec = sum([a * real(n) for (a,n) in zip(cmat * amps, op.diag)])
+    expec = sum([a * real(n) for (a, n) in zip(cmat * amps, op.diag)])
     (
         expec,
-        sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
+        sqrt(sum([(err * real(n))^2 for (err, n) in zip(cmat * errs, op.diag)]))
     )
 end
 
@@ -486,7 +486,7 @@ function _expectation_value_noisy(
     S = [real(op.diag[s]) for s in samples]
     (
         mean(S),
-        2*std(S)/sqrt(shots), #Using 2σ because 95% of the data is within this error
-        sqrt(sum([(err * real(n))^2 for (err,n) in zip(cmat * errs, op.diag)]))
+        2 * std(S) / sqrt(shots), #Using 2σ because 95% of the data is within this error
+        sqrt(sum([(err * real(n))^2 for (err, n) in zip(cmat * errs, op.diag)]))
     )
 end
