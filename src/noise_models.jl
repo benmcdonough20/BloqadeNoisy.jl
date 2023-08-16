@@ -42,6 +42,9 @@ function load_error_model(props)
 
     function coherent_noisy(h)
         (atoms,ϕ,Ω,Δ) = get_rydberg_params(h)
+        if Δ === nothing
+            throw("Δ needs to be specified!")
+        end
         if eltype(atoms) == Tuple{Float64}
             atoms = [(first(a), 0.0) for a in atoms]
         end

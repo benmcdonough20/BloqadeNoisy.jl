@@ -48,7 +48,7 @@ using Kronecker
     ns = NoisySchrodingerProblem(reg, save_times, h, c_ops)
     trivial_error_model = ErrorModel(
         n -> Matrix(I, n, n),
-        n -> [],
+        n -> [zeros(n,n)],
         h -> (() -> h)
     )
     confusion_matrix(n) = kronecker([[[.9 .1];[.1 .9]] for i in 1:n]...)

@@ -10,7 +10,7 @@ interface to fit into a standard ODE Problem.
 - `imag_evo`: ∑_L L^†L for collapse operators L which defines the non-hermitian part of the Hamiltonian
 - `num_cops``: number of collapse operators (for displaying)
 """
-struct NoisySchrodingerEquation{mType<:SparseMatrixCSC}
+struct NoisySchrodingerEquation{mType}
     equation::SchrodingerEquation #Wraps this SchrodingerEquation
     imag_evo::mType #anti-hermitian part of the Hamiltonian
     num_cops::Int
@@ -46,7 +46,7 @@ struct NoisySchrodingerProblem{Reg,EquationType<:ODEFunction,uType,tType,Algo,Kw
        SciMLBase.AbstractODEProblem{uType,tType,true}
     reg::Reg
     f::EquationType
-    c_ops::Vector{T} where T <: SparseMatrixCSC
+    c_ops::Vector
     state::uType
     u0::uType
     tspan::tType
@@ -63,7 +63,7 @@ function NoisySchrodingerProblem(
     reg::AbstractRegister,
     save_times,
     expr,
-    c_ops::Vector{T} where T <: SparseMatrixCSC,
+    c_ops::Vector,
     coherent_noise::Function,
     confusion_mat; #TODO: property checking. Needs to support matrix-vector multiplication
     algo=DP8(), #Algorithm that was used for testing
@@ -81,6 +81,8 @@ function NoisySchrodingerProblem(
     try
         if length(c_ops) != 0
             [c^2 * state for c in c_ops] #making sure matrix-vector product works and matrix is square
+        else
+            c_ops = [0*I]
         end
     catch
         throw(ArgumentError("Collapse operators are either not square or do not match register type"))
@@ -104,7 +106,7 @@ function NoisySchrodingerProblem(
         SchrodingerEquation(
             expr, Hamiltonian(T, expr,space)
         ),
-        SparseMatrixCSC(zeros(length(state), length(state)) + sum([l'*l for l in c_ops])),
+        sum([l'*l for l in c_ops]),
         length(c_ops)
     )
     ode_f = ODEFunction(eq)
