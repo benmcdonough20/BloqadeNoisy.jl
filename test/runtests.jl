@@ -47,10 +47,11 @@ using Kronecker
     h = rydberg_h([(0,0)], Ω = 15)
     ns = NoisySchrodingerProblem(reg, save_times, h, c_ops)
     trivial_error_model = ErrorModel(
-        n -> Matrix(I, n, n),
-        n -> [zeros(n,n)],
+        n -> I,
+        n -> [],
         h -> (() -> h)
     )
+    ns = NoisySchrodingerProblem(reg, [0, 4], h, trivial_error_model)
     confusion_matrix(n) = kronecker([[[.9 .1];[.1 .9]] for i in 1:n]...)
     bitflip_model(n) = [SparseMatrixCSC(sqrt(1/10)*mat(put(n, i=>X))) for i in 1:n]
     coherent_noise(h) = () -> ((atoms,ϕ,Ω,Δ)=get_rydberg_params(h); rydberg_h(atoms; Ω = Ω*(1+.08*randn()), Δ = Δ, ϕ = ϕ))
